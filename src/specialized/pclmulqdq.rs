@@ -339,7 +339,7 @@ unsafe fn reduce_128_to_crc(mut x: arch::__m128i, mut data: &[u8]) -> u32 {
 
         let mut part = [0u8; 16];
         part[..n].copy_from_slice(data);
-        let part = arch::_mm_loadu_si128(part.as_ptr() as *const arch::__m128i);
+        let part = load128(&part);
         x = arch::_mm_xor_si128(x, arch::_mm_shuffle_epi8(part, shl));
 
         x = reduce128(overflow, x, k3k4);
@@ -427,9 +427,34 @@ unsafe fn reduce512(a: arch::__m512i, b: arch::__m512i, keys: arch::__m512i) -> 
     arch::_mm512_xor_si512(arch::_mm512_xor_si512(b, t1), t2)
 }
 
+// Verification patch: the unaligned loads are moved into three small helpers so the rest of the
+// file has no raw-pointer casts. Each helper reads the first 16/32/64 bytes of `a`.
+#[inline]
+unsafe fn load128(a: &[u8]) -> arch::__m128i {
+    debug_assert!(a.len() >= 16);
+    arch::_mm_loadu_si128(a.as_ptr() as *const arch::__m128i)
+}
+
+#[cfg(stable_vpclmulqdq)]
+#[target_feature(enable = "avx")]
+#[inline]
+unsafe fn load256(a: &[u8]) -> arch::__m256i {
+    debug_assert!(a.len() >= 32);
+    arch::_mm256_loadu_si256(a.as_ptr() as *const arch::__m256i)
+}
+
+#[cfg(stable_vpclmulqdq)]
+#[allow(clippy::incompatible_msrv)]
+#[target_feature(enable = "avx512f")]
+#[inline]
+unsafe fn load512(a: &[u8]) -> arch::__m512i {
+    debug_assert!(a.len() >= 64);
+    arch::_mm512_loadu_si512(a.as_ptr() as *const _)
+}
+
 unsafe fn get(a: &mut &[u8]) -> arch::__m128i {
     debug_assert!(a.len() >= 16);
-    let r = arch::_mm_loadu_si128(a.as_ptr() as *const arch::__m128i);
+    let r = load128(a);
     *a = &a[16..];
     r
 }
@@ -439,7 +464,7 @@ unsafe fn get(a: &mut &[u8]) -> arch::__m128i {
 #[inline]
 unsafe fn get256(a: &mut &[u8]) -> arch::__m256i {
     debug_assert!(a.len() >= 32);
-    let r = arch::_mm256_loadu_si256(a.as_ptr() as *const arch::__m256i);
+    let r = load256(a);
     *a = &a[32..];
     r
 }
@@ -450,7 +475,7 @@ unsafe fn get256(a: &mut &[u8]) -> arch::__m256i {
 #[inline]
 unsafe fn get512(a: &mut &[u8]) -> arch::__m512i {
     debug_assert!(a.len() >= 64);
-    let r = arch::_mm512_loadu_si512(a.as_ptr() as *const _);
+    let r = load512(a);
     *a = &a[64..];
     r
 }

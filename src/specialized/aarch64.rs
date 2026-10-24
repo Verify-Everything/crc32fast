@@ -40,7 +40,7 @@ const MIN_TRIPLE_QUADS: usize = 192;
 // target_feature is necessary to allow rustc to inline the crc32* wrappers
 #[target_feature(enable = "crc")]
 pub unsafe fn calculate(crc: u32, data: &[u8]) -> u32 {
-    let (pre_quad, quads, post_quad) = data.align_to::<u64>();
+    let (pre_quad, quads, post_quad) = split_quads(data);
 
     // Running (finalized) CRC.
     let mut r = crc;
@@ -66,25 +66,24 @@ pub unsafe fn calculate(crc: u32, data: &[u8]) -> u32 {
         let mut c2 = !0u32;
 
         // Unroll each stream by 4 while keeping the three chains independent.
-        let mut chunks_a = a.chunks_exact(4);
-        let mut chunks_b = b.chunks_exact(4);
-        let mut chunks_c = c.chunks_exact(4);
-        for ((qa, qb), qc) in (&mut chunks_a).zip(&mut chunks_b).zip(&mut chunks_c) {
+        // Verification patch: the `chunks_exact(4)` + `zip` loops written with an index (Aeneas
+        // cannot translate `for` over `&mut` iterators). `a`, `b`, `c` all have length `n3`, so
+        // this makes the same `__crc32d` calls in the same order: full chunks of 4, then the
+        // `n3 % 4` remainder words.
+        let mut i = 0;
+        while i + 4 <= n3 {
             for k in 0..4 {
-                c0 = arch::__crc32d(c0, qa[k]);
-                c1 = arch::__crc32d(c1, qb[k]);
-                c2 = arch::__crc32d(c2, qc[k]);
+                c0 = arch::__crc32d(c0, a[i + k]);
+                c1 = arch::__crc32d(c1, b[i + k]);
+                c2 = arch::__crc32d(c2, c[i + k]);
             }
+            i += 4;
         }
-        for ((&qa, &qb), &qc) in chunks_a
-            .remainder()
-            .iter()
-            .zip(chunks_b.remainder())
-            .zip(chunks_c.remainder())
-        {
-            c0 = arch::__crc32d(c0, qa);
-            c1 = arch::__crc32d(c1, qb);
-            c2 = arch::__crc32d(c2, qc);
+        while i < n3 {
+            c0 = arch::__crc32d(c0, a[i]);
+            c1 = arch::__crc32d(c1, b[i]);
+            c2 = arch::__crc32d(c2, c[i]);
+            i += 1;
         }
 
         r = crate::combine::combine(!c0, !c1, block_len);
@@ -100,13 +99,21 @@ pub unsafe fn calculate(crc: u32, data: &[u8]) -> u32 {
     crc_bytes(r, post_quad)
 }
 
+// Verification patch: `align_to` in its own function, so the proofs model it in one place.
+#[inline]
+fn split_quads(data: &[u8]) -> (&[u8], &[u64], &[u8]) {
+    // SAFETY: every bit pattern is a valid `u64`.
+    unsafe { data.align_to::<u64>() }
+}
+
 #[target_feature(enable = "crc")]
 unsafe fn crc_quads(crc: u32, quads: &[u64]) -> u32 {
     let mut c = !crc;
 
     // unrolling increases performance by a lot
     let mut quad_iter = quads.chunks_exact(8);
-    for chunk in &mut quad_iter {
+    // Verification patch: `for chunk in &mut quad_iter` written as the `while let` it stands for.
+    while let Some(chunk) = quad_iter.next() {
         c = arch::__crc32d(c, chunk[0]);
         c = arch::__crc32d(c, chunk[1]);
         c = arch::__crc32d(c, chunk[2]);
