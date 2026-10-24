@@ -115,7 +115,9 @@ impl Hasher {
 
     /// Process the given byte slice and update the hash state.
     pub fn update(&mut self, buf: &[u8]) {
-        self.amount += buf.len() as u64;
+        // Verified fix: the byte count wraps modulo 2^64 (as release builds already do) instead of
+        // panicking in debug builds, e.g. after `new_with_initial_len(_, u64::MAX)`.
+        self.amount = self.amount.wrapping_add(buf.len() as u64);
         self.state = match &self.spec {
             None => baseline::update_fast_16(self.state, buf),
             Some(spec) => spec.update(self.state, buf),
@@ -159,7 +161,8 @@ impl Hasher {
 
     /// Combine the hash state with the hash state for the subsequent block of bytes.
     pub fn combine(&mut self, other: &Self) {
-        self.amount += other.amount;
+        // Verified fix: wraps modulo 2^64, as in `update`.
+        self.amount = self.amount.wrapping_add(other.amount);
         self.state = combine::combine(self.state, other.state, other.amount);
     }
 }
