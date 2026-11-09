@@ -47,7 +47,10 @@ impl State {
         {
             #[cfg(stable_vpclmulqdq)]
             {
-                if cfg!(target_feature = "avx512f") && cfg!(target_feature = "vpclmulqdq") {
+                if cfg!(target_feature = "avx512f")
+                    && cfg!(target_feature = "avx2")
+                    && cfg!(target_feature = "vpclmulqdq")
+                {
                     return Some(Kind::Avx512);
                 }
                 if cfg!(target_feature = "avx2") && cfg!(target_feature = "vpclmulqdq") {
@@ -70,7 +73,10 @@ impl State {
         {
             #[cfg(stable_vpclmulqdq)]
             {
-                if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("vpclmulqdq") {
+                if is_x86_feature_detected!("avx512f")
+                    && is_x86_feature_detected!("avx2")
+                    && is_x86_feature_detected!("vpclmulqdq")
+                {
                     return Some(Kind::Avx512);
                 }
                 if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("vpclmulqdq") {
